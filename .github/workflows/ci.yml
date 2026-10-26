@@ -1,0 +1,107 @@
+name: CI
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  helm:
+    name: Helm lint + schema check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.18.4
+      - name: Install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz -C /usr/local/bin kubeconform
+      - name: Lint and validate every app x environment
+        run: |
+          set -euo pipefail
+          for app in payflow-ledger telemetry-stream; do
+            for env in kind dev prod; do
+              echo "::group::$app / $env"
+              args=(-f deploy/$app/values.yaml -f deploy/$app/values-$env.yaml)
+              helm lint charts/spring-service "${args[@]}" --strict
+              helm template "$app" charts/spring-service "${args[@]}" \
+                | kubeconform -strict -summary -kubernetes-version 1.33.0 \
+                    -schema-location default \
+                    -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+              echo "::endgroup::"
+            done
+          done
+      - name: Secret store chart
+        run: helm lint terraform/modules/cluster-addons/charts/secret-store --strict
+
+  terraform:
+    name: Terraform fmt + validate + tflint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.13.0"
+      - uses: terraform-linters/setup-tflint@v4
+      - run: terraform fmt -check -recursive terraform
+      - name: Validate dev and prod (no backend, no AWS credentials needed)
+        run: |
+          for env in dev prod; do
+            terraform -chdir=terraform/envs/$env init -backend=false -input=false
+            terraform -chdir=terraform/envs/$env validate
+          done
+      - run: tflint --init
+      - name: tflint
+        run: |
+          for env in dev prod; do tflint --chdir=terraform/envs/$env --config=$GITHUB_WORKSPACE/.tflint.hcl; done
+          tflint --recursive --chdir=terraform/modules --config=$GITHUB_WORKSPACE/.tflint.hcl
+
+  e2e-kind:
+    name: End-to-end on kind
+    needs: helm
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: Jagadeesh-Udatha/payflow-ledger
+          path: apps/payflow-ledger
+      - uses: actions/checkout@v4
+        with:
+          repository: Jagadeesh-Udatha/telemetry-stream
+          path: apps/telemetry-stream
+      - uses: docker/setup-buildx-action@v3
+      - name: Build images
+        run: |
+          for app in payflow-ledger telemetry-stream; do
+            docker buildx build --load -t $app:ci \
+              --cache-from type=gha,scope=$app --cache-to type=gha,mode=max,scope=$app \
+              apps/$app
+          done
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.18.4
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: platform
+          config: dev/kind.yaml
+      - name: Load images into kind
+        run: |
+          kind load docker-image payflow-ledger:ci --name platform
+          kind load docker-image telemetry-stream:ci --name platform
+      - name: Deploy dependencies and both services
+        run: ./dev/up.sh
+      - name: Smoke test
+        run: ./dev/smoke.sh
+      - name: Diagnostics
+        if: failure()
+        run: |
+          kubectl -n platform get all,externalsecrets,pdb,hpa -o wide || true
+          kubectl -n platform describe pods || true
+          for d in payflow-ledger telemetry-stream kafka postgres mongo; do
+            echo "::group::logs $d"; kubectl -n platform logs deploy/$d --all-containers --tail=200 || true; echo "::endgroup::"
+          done
+          kubectl -n platform get events --sort-by=.lastTimestamp || true

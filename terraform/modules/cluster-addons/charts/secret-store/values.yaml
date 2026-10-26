@@ -1,0 +1,6 @@
+name: aws-secrets-manager
+region: ap-south-1
+serviceAccount:
+  name: external-secrets
+  namespace: external-secrets
+appNamespace: platform

@@ -1,0 +1,76 @@
+# Manual deploy to EKS. Build an app image, push it to ECR tagged with the app commit SHA, helm upgrade.
+# Needs, per GitHub environment (dev / prod): variable AWS_DEPLOY_ROLE_ARN (terraform output github_deploy_role_arn).
+# Give the prod environment a required reviewer so prod deploys wait for approval.
+name: Deploy
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [dev, prod]
+        default: dev
+      app:
+        type: choice
+        options: [payflow-ledger, telemetry-stream]
+      ref:
+        description: App repository branch, tag or SHA
+        default: main
+
+permissions:
+  contents: read
+  id-token: write # for the AWS OIDC login
+
+concurrency:
+  group: deploy-${{ inputs.environment }}-${{ inputs.app }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-south-1
+  CLUSTER: platform-${{ inputs.environment }}
+  NAMESPACE: platform
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: Jagadeesh-Udatha/${{ inputs.app }}
+          ref: ${{ inputs.ref }}
+          path: app
+      - id: sha
+        run: echo "tag=$(git -C app rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push (skipped if this SHA is already in ECR; tags are immutable)
+        env:
+          REPO: ${{ steps.ecr.outputs.registry }}/${{ inputs.environment }}/${{ inputs.app }}
+          TAG: ${{ steps.sha.outputs.tag }}
+        run: |
+          if aws ecr describe-images --repository-name "${{ inputs.environment }}/${{ inputs.app }}" --image-ids imageTag="$TAG" >/dev/null 2>&1; then
+            echo "image $TAG already pushed"
+          else
+            docker build -t "$REPO:$TAG" app
+            docker push "$REPO:$TAG"
+          fi
+          echo "IMAGE_REPO=$REPO" >> "$GITHUB_ENV"
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.18.4
+      - run: aws eks update-kubeconfig --name "$CLUSTER" --region "$AWS_REGION"
+      - name: Helm upgrade (--atomic rolls back if pods do not get ready)
+        run: |
+          helm upgrade --install "${{ inputs.app }}" charts/spring-service -n "$NAMESPACE" \
+            -f deploy/${{ inputs.app }}/values.yaml -f deploy/${{ inputs.app }}/values-${{ inputs.environment }}.yaml \
+            --set image.repository="$IMAGE_REPO" --set image.tag="${{ steps.sha.outputs.tag }}" \
+            --atomic --wait --timeout 8m
+      - run: helm test "${{ inputs.app }}" -n "$NAMESPACE" --timeout 3m

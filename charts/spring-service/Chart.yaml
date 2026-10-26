@@ -1,0 +1,10 @@
+apiVersion: v2
+name: spring-service
+description: One chart for any Spring Boot service - probes on Actuator, config and secrets as env, HPA, PDB, ingress (AWS ALB), External Secrets and a hardened pod spec.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords: [spring-boot, java, eks]
+maintainers:
+  - name: Jagadeesh Udatha
+    url: https://github.com/Jagadeesh-Udatha

@@ -1,0 +1,10 @@
+{{ include "svc.name" . }} {{ include "svc.tag" . }} is deployed in namespace {{ .Release.Namespace }}.
+
+Check it:
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "svc.name" . }}
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+{{- if .Values.ingress.enabled }}
+  URL: http{{ if .Values.ingress.tlsSecretName }}s{{ end }}://{{ .Values.ingress.host }}{{ .Values.ingress.path }}
+{{- else }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "svc.name" . }} 8080:{{ .Values.service.port }}
+{{- end }}

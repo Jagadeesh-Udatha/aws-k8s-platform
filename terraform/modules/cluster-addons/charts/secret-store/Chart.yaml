@@ -1,0 +1,5 @@
+apiVersion: v2
+name: secret-store
+description: Platform base objects - the ClusterSecretStore for AWS Secrets Manager and the app namespace
+type: application
+version: 0.1.0
