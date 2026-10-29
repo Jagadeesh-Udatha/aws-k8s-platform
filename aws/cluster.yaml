@@ -1,0 +1,31 @@
+# EKS cluster for both services, created with eksctl (the official EKS CLI): eksctl create cluster -f aws/cluster.yaml
+# eksctl also creates the VPC (public + private subnets in 2 AZs) and the node IAM role.
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+metadata:
+  name: platform-dev
+  region: ap-south-1
+  version: "1.33"
+
+iam:
+  withOIDC: true          # lets GitHub Actions and pods use IAM roles
+
+vpc:
+  nat:
+    gateway: Single       # one NAT gateway keeps dev cheap
+
+managedNodeGroups:
+  - name: apps
+    instanceTypes: ["t3.large", "t3a.large"]
+    spot: true            # dev only: cheaper, can be reclaimed
+    minSize: 2
+    maxSize: 4
+    desiredCapacity: 2
+    privateNetworking: true
+    labels: { role: apps }
+
+addons:
+  - name: vpc-cni
+  - name: coredns
+  - name: kube-proxy
+  - name: metrics-server  # needed by the HorizontalPodAutoscalers

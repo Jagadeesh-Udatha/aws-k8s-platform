@@ -1,8 +1,1 @@
-**/.terraform/*
-*.tfstate
-*.tfstate.*
-*.tfplan
-crash.log
-terraform.tfvars
-backend.hcl
 .DS_Store

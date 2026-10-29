@@ -1,8 +1,0 @@
-# The app namespace is created here, by Terraform, because the GitHub deploy role
-# only has edit rights inside it and so cannot create it.
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: {{ .Values.appNamespace }}
-  labels:
-    app.kubernetes.io/managed-by: terraform

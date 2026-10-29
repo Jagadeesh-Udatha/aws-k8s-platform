@@ -1,0 +1,76 @@
+# payflow-ledger: Spring Boot service. Config comes from the ConfigMap and Secret "payflow-ledger"
+# (created by local/up.sh on kind, or aws/deploy.sh on EKS). The image tag is set at deploy time.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payflow-ledger
+  labels: { app: payflow-ledger }
+spec:
+  replicas: 2            # the HPA takes over once it is applied
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels: { app: payflow-ledger }
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0  # never drop below the desired count during a rollout
+      maxSurge: 1
+  template:
+    metadata:
+      labels: { app: payflow-ledger }
+    spec:
+      enableServiceLinks: false   # no FOO_SERVICE_HOST/FOO_PORT env vars leaking into Spring's config
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app: payflow-ledger }
+      containers:
+        - name: app
+          image: payflow-ledger:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8080 }
+          env:
+            - { name: SERVER_SHUTDOWN, value: graceful }
+            - { name: JAVA_TOOL_OPTIONS, value: "-Djava.io.tmpdir=/tmp" }
+          envFrom:
+            - configMapRef: { name: payflow-ledger }
+            - secretRef: { name: payflow-ledger, optional: true }
+          # Slow JVM starts get up to 2 minutes before liveness checks begin.
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 2
+            failureThreshold: 60
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 5
+          lifecycle:
+            preStop:
+              exec:
+                # Let the load balancer stop routing here before Spring starts draining.
+                command: ["sh", "-c", "sleep 5"]
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { memory: 768Mi }   # no CPU limit: throttling hurts JVM startup and GC
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        # The root filesystem is read-only; Tomcat and the JVM still need a writable /tmp.
+        - name: tmp
+          emptyDir: { sizeLimit: 256Mi }

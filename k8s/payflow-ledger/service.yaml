@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: payflow-ledger
+  labels: { app: payflow-ledger }
+spec:
+  type: ClusterIP
+  selector: { app: payflow-ledger }
+  ports:
+    - { name: http, port: 80, targetPort: http }

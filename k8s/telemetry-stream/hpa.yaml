@@ -1,0 +1,18 @@
+# telemetry.raw has 12 partitions and each pod runs 2 consumer threads, so more than 6 pods would sit idle.
+# A long scale-down window avoids consumer-group rebalance storms.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: telemetry-stream
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: telemetry-stream }
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 70 }
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300

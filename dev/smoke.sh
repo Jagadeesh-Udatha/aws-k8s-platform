@@ -36,7 +36,7 @@ CODE=$(curl -s -o /tmp/pay2.json -w '%{http_code}' -X POST "$API/api/payments" "
 [ "$(jq -r .id /tmp/pay1.json)" = "$(jq -r .id /tmp/pay2.json)" ] || fail "retry created a second payment"
 echo "transfer 201, retry replayed with the same payment id"
 
-# The outbox relay (FOR UPDATE SKIP LOCKED on PostgreSQL) must have published the event.
+# The outbox relay (FOR UPDATE SKIP LOCKED on MySQL) must have published the event.
 EVENTS=$($K exec deploy/kafka -- /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
   --topic payments.events --from-beginning --timeout-ms 30000 2>/dev/null || true)
 echo "$EVENTS" | grep -q "$(jq -r .id /tmp/pay1.json)" || fail "payment event not found on payments.events"

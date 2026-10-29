@@ -1,33 +1,34 @@
-# Throwaway dependencies for the kind cluster (local and CI): PostgreSQL, Kafka (KRaft) and MongoDB.
-# On AWS these are RDS, MSK and MongoDB Atlas, created by Terraform and wired in through Secrets Manager.
+# Throwaway dependencies for the kind cluster (local and CI): MySQL, Kafka (KRaft) and MongoDB.
+# On AWS these are RDS for MySQL, Amazon MSK and MongoDB Atlas (see aws/create.sh).
 apiVersion: apps/v1
 kind: Deployment
-metadata: { name: postgres, labels: { app: postgres } }
+metadata: { name: mysql, labels: { app: mysql } }
 spec:
-  selector: { matchLabels: { app: postgres } }
+  selector: { matchLabels: { app: mysql } }
   template:
-    metadata: { labels: { app: postgres } }
+    metadata: { labels: { app: mysql } }
     spec:
       enableServiceLinks: false
       containers:
-        - name: postgres
-          image: postgres:16-alpine
+        - name: mysql
+          image: mysql:8.4
           env:
-            - { name: POSTGRES_DB, value: payflow }
-            - { name: POSTGRES_USER, value: payflow }
-            - { name: POSTGRES_PASSWORD, value: payflow }
-          ports: [{ containerPort: 5432 }]
+            - { name: MYSQL_DATABASE, value: payflow }
+            - { name: MYSQL_USER, value: payflow }
+            - { name: MYSQL_PASSWORD, value: payflow }
+            - { name: MYSQL_ROOT_PASSWORD, value: root }
+          ports: [{ containerPort: 3306 }]
           readinessProbe:
-            exec: { command: ["pg_isready", "-U", "payflow"] }
+            exec: { command: ["mysqladmin", "ping", "-h", "127.0.0.1", "-upayflow", "-ppayflow"] }
             periodSeconds: 3
-          resources: { requests: { cpu: 100m, memory: 256Mi } }
+          resources: { requests: { cpu: 100m, memory: 512Mi } }
 ---
 apiVersion: v1
 kind: Service
-metadata: { name: postgres }
+metadata: { name: mysql }
 spec:
-  selector: { app: postgres }
-  ports: [{ port: 5432 }]
+  selector: { app: mysql }
+  ports: [{ port: 3306 }]
 ---
 apiVersion: apps/v1
 kind: Deployment
