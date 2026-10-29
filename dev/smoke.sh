@@ -20,7 +20,7 @@ echo "== PayFlow"
 API=localhost:18080
 TOKEN=$(curl -fsS -X POST "$API/api/auth/token" -H 'Content-Type: application/json' \
   -d '{"username":"ops","password":"ops-kind-password"}' | jq -r .accessToken)
-[ -n "$TOKEN" ] && [ "$TOKEN" != null ] || fail "no token"
+if [ -z "$TOKEN" ] || [ "$TOKEN" = null ]; then fail "no token"; fi
 AUTH=(-H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json')
 
 A=$(curl -fsS -X POST "$API/api/accounts" "${AUTH[@]}" -d '{"ownerName":"Asha","currency":"INR","openingDeposit":1000.00}' | jq -r .id)
@@ -32,7 +32,7 @@ KEY="smoke-$(date +%s)"
 CODE=$(curl -s -o /tmp/pay1.json -w '%{http_code}' -X POST "$API/api/payments" "${AUTH[@]}" -H "Idempotency-Key: $KEY" -d "$BODY")
 [ "$CODE" = 201 ] || fail "first transfer returned $CODE: $(cat /tmp/pay1.json)"
 CODE=$(curl -s -o /tmp/pay2.json -w '%{http_code}' -X POST "$API/api/payments" "${AUTH[@]}" -H "Idempotency-Key: $KEY" -d "$BODY")
-[ "$CODE" = 200 ] && [ "$(jq -r .replayed /tmp/pay2.json)" = true ] || fail "retry was not a replay ($CODE)"
+if [ "$CODE" != 200 ] || [ "$(jq -r .replayed /tmp/pay2.json)" != true ]; then fail "retry was not a replay ($CODE)"; fi
 [ "$(jq -r .id /tmp/pay1.json)" = "$(jq -r .id /tmp/pay2.json)" ] || fail "retry created a second payment"
 echo "transfer 201, retry replayed with the same payment id"
 
